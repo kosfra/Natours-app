@@ -1,21 +1,55 @@
 const Tour = require('../models/tourModel');
 
+exports.aliasTopTours = (req, res, next) => {
+  req.query.limit = '5';
+  req.query.sort = '-ratingsAvarage,price';
+  req.query.fields = 'name,price,ratingsAvarage,summary,difficulty';
+  next();
+};
+
 exports.getAllTours = async (req, res) => {
   try {
+    console.log(req.query);
+
     // BUILD QUERY
+    // 1 A) Filtering
     const queryObj = { ...req.query };
     const excludedFields = ['page', 'sort', 'limit', 'fields'];
     excludedFields.forEach((el) => delete queryObj[el]);
 
-    console.log(req.query, queryObj);
+    // 2 B) Advance filtering
+    let queryStr = JSON.stringify(queryObj);
+    queryStr = queryStr.replace(/\b(gte|gt|lte|lt)\b/g, (match) => `$${match}`);
 
-    const query = Tour.find(queryObj);
+    let query = Tour.find(JSON.parse(queryStr));
 
-    // const query = Tour.find()
-    //   .where('duration')
-    //   .equals(5)
-    //   .where('difficulty')
-    //   .equals('easy');
+    // 2) Sorting
+    if (req.query.sort) {
+      const sortBy = req.query.sort.split(',').join(' ');
+      query = query.sort(sortBy);
+    } else {
+      query = query.sort('-createdAt name');
+    }
+
+    // 3) Field limiting
+    if (req.query.fields) {
+      const fields = req.query.fields.split(',').join(' ');
+      query = query.select(fields);
+    } else {
+      query = query.select('-__v');
+    }
+
+    // 4) Pagination
+    const page = req.query.page * 1 || 1;
+    const limit = req.query.limit * 1 || 100;
+    const skip = (page - 1) * limit;
+
+    query = query.skip(skip).limit(limit);
+
+    if (req.query.page) {
+      const numTours = await query.countDocuments();
+      if (skip >= numTours) throw new Error('Page not found');
+    }
 
     // EXECUTE QUERY
     const tours = await query;
@@ -29,9 +63,9 @@ exports.getAllTours = async (req, res) => {
       },
     });
   } catch (err) {
-    res.status(400).json({
+    res.status(404).json({
       status: 'error',
-      message: err,
+      message: err.message,
     });
   }
 };
